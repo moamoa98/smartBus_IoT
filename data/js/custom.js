@@ -71,11 +71,10 @@ function touchEndHandler(event) {
 
 
 document.querySelectorAll('.control').forEach(item => {
-  item.addEventListener('touchstart', touchStartHandler)
-})
-
-document.querySelectorAll('.control').forEach(item => {
-  item.addEventListener('touchend', touchEndHandler)
+  item.addEventListener('touchstart', touchStartHandler);
+  item.addEventListener('touchend', touchEndHandler);
+  item.addEventListener('mousedown', touchStartHandler); // Add this line
+  item.addEventListener('mouseup', touchEndHandler); // Add this line
 })
 
 

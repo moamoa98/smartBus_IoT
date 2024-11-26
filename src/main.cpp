@@ -9,7 +9,7 @@ int currentDegree = 90;
 int maxLeft = 50;
 int maxRight = 140;
 
-#define SERVO_PIN 4
+#define SERVO_PIN 13
 
 /*
   The resolution of the PWM is 8 bit so the value is between 0-255
@@ -22,23 +22,24 @@ enum speedSettings
   FAST = 255
 };
 
-//tạo đối tượng servo
+// tạo đối tượng servo
 Servo steeringServo;
 
-void setSteeringAngle(int angle) {
+void setSteeringAngle(int angle)
+{
   steeringServo.write(angle);
-  delay(200);  // Đợi servo quay đến vị trí
+  delay(200); // Đợi servo quay đến vị trí
 }
 
 class Car
 {
 private:
   // Motor pins
-  int INA = 15;
-  int INB = 2;
+  int INA = 14;
+  int INB = 12;
 
   // PWM Setup to control motor speed
-  const int SPEED_CONTROL_PIN = 16;
+  // const int SPEED_CONTROL_PIN = 16;
 
   // Play around with the frequency settings depending on the motor that you are using
   const int freq = 2000;
@@ -55,34 +56,33 @@ public:
     // Set all pins to output
     pinMode(INA, OUTPUT);
     pinMode(INB, OUTPUT);
-    pinMode(SPEED_CONTROL_PIN, OUTPUT);
+    // pinMode(SPEED_CONTROL_PIN, OUTPUT);
 
     // Set initial motor state to OFF
     digitalWrite(INA, LOW);
     digitalWrite(INB, LOW);
 
-
-    //Set the PWM Settings
+    // Set the PWM Settings
     ledcSetup(channel, freq, resolution);
 
-
-    //Attach Pin to Channel
-    ledcAttachPin(SPEED_CONTROL_PIN, channel);
-
+    // // Attach Pin to Channel
+    // ledcAttachPin(SPEED_CONTROL_PIN, channel);
 
     // initialize default speed to SLOW
     setCurrentSpeed(speedSettings::NORMAL);
   }
 
   // Turn the car left
-  
+
   // Move the car forward
   void moveForward()
   {
     Serial.println("car is moving forward...");
     setMotorSpeed();
-    digitalWrite(INB, LOW);
-    digitalWrite(INA, HIGH);
+    // digitalWrite(INB, LOW);
+    // digitalWrite(INA, HIGH);
+    analogWrite(INA, currentSpeedSettings);
+    analogWrite(INB, 0);
   }
 
   // Move the car backward
@@ -90,8 +90,10 @@ public:
   {
     setMotorSpeed();
     Serial.println("car is moving backward...");
-    digitalWrite(INB, HIGH);
-    digitalWrite(INA, LOW);
+    // digitalWrite(INB, HIGH);
+    // digitalWrite(INA, LOW);
+    analogWrite(INA, 0);
+    analogWrite(INB, currentSpeedSettings);
   }
 
   // Stop the car
@@ -101,9 +103,10 @@ public:
     ledcWrite(channel, 0);
 
     // // Turn off motors
-    digitalWrite(INA, LOW);
-    digitalWrite(INB, LOW);
-
+    // digitalWrite(INA, LOW);
+    // digitalWrite(INB, LOW);
+    analogWrite(INA, 0);
+    analogWrite(INB, 0);
   }
 
   void turnRight()
@@ -225,42 +228,38 @@ void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventTyp
   switch (type)
   {
   case WS_EVT_CONNECT:
-  {
     Serial.printf("ws[%s][%u] connect\n", server->url(), client->id());
-    // client->printf("Hello Client %u :)", client->id());
-    // client->ping();
-  }
+    client->printf("Hello Client %u :)", client->id());
+    client->ping();
+    break;
 
   case WS_EVT_DISCONNECT:
-  {
     Serial.printf("ws[%s][%u] disconnect\n", server->url(), client->id());
-  }
+    break;
 
   case WS_EVT_DATA:
   {
-    //data packet
     AwsFrameInfo *info = (AwsFrameInfo *)arg;
     if (info->final && info->index == 0 && info->len == len)
     {
-      //the whole message is in a single frame and we got all of it's data
       if (info->opcode == WS_TEXT)
       {
         data[len] = 0;
         char *command = (char *)data;
+        Serial.printf("ws[%s][%u] command: %s\n", server->url(), client->id(), command);
         sendCarCommand(command);
       }
     }
+    break;
   }
 
   case WS_EVT_PONG:
-  {
     Serial.printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char *)data : "");
-  }
+    break;
 
   case WS_EVT_ERROR:
-  {
-    // Serial.printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
-  }
+    Serial.printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
+    break;
   }
 }
 
@@ -270,13 +269,39 @@ void notFound(AsyncWebServerRequest *request)
   request->send(404, "text/plain", "Not found");
 }
 
+void listSPIFFSFiles()
+{
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
+  while (file)
+  {
+    Serial.println(file.name()); // Print the file name
+    file = root.openNextFile();
+  }
+}
+
 // Setup function
 void setup()
 {
-  steeringServo.attach(SERVO_PIN);
-  setSteeringAngle(90);
   // Initialize the serial monitor baud rate
   Serial.begin(115200);
+  SPIFFS.begin();
+  // other code
+  server.serveStatic("/", SPIFFS, "/").setDefaultFile("/index.html");
+
+  // Open the root directory
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
+  while (file)
+  {
+    Serial.println(file.name()); // Print the file name
+    file = root.openNextFile();
+  }
+
+  // Attach the steering servo
+  steeringServo.attach(SERVO_PIN);
+  setSteeringAngle(90);
+
   Serial.println("Connecting to ");
   Serial.println(ssid);
 
@@ -299,6 +324,9 @@ void setup()
     return;
   }
 
+  // List files in SPIFFS
+  listSPIFFSFiles();
+
   // Add callback function to websocket server
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
@@ -306,8 +334,11 @@ void setup()
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             {
               Serial.println("Requesting index page...");
-              request->send(SPIFFS, "/index.html", "text/html", false, indexPageProcessor);
-            });
+              request->send(SPIFFS, "/index.html", "text/html", false, indexPageProcessor); });
+
+  // Route to load entireframework.min.css file
+  server.on("/test", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(SPIFFS, "/test.html", "text/html"); });
 
   // Route to load entireframework.min.css file
   server.on("/css/entireframework.min.css", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -330,5 +361,4 @@ void setup()
 
 void loop()
 {
-  // No code in here.  Server is running in asynchronous mode
 }
