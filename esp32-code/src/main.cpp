@@ -35,8 +35,8 @@ class Car
 {
 private:
   // Motor pins
-  int INA = 14;
-  int INB = 12;
+  int INA = 16;
+  int INB = 17;
 
   // PWM Setup to control motor speed
   // const int SPEED_CONTROL_PIN = 16;
