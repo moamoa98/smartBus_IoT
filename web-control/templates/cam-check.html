@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32-CAM Stream</title>
+</head>
+<body>
+  <h1>ESP32-CAM Video Stream</h1>
+  <img id="videoFrame" style="width: 100%; max-width: 640px; height: auto;" />
+  <script>
+    const ws = new WebSocket("ws://192.168.1.137:81");
+    const videoFrame = document.getElementById("videoFrame");
+    const reader = new FileReader();
+
+    let lastFrameTime = 0;
+
+    ws.onmessage = function(event) {
+        const now = Date.now();
+        if (now - lastFrameTime < 33) return; // Bỏ qua frame nếu quá gần (30 FPS)
+        lastFrameTime = now;
+
+        const blob = new Blob([event.data], { type: "image/jpeg" });
+        const url = URL.createObjectURL(blob);
+        videoFrame.src = url;
+
+        setTimeout(() => URL.revokeObjectURL(url), 100); // Dọn dẹp bộ nhớ
+    };
+  </script>
+</body>
+</html>
