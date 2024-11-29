@@ -1,22 +1,34 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-#include <WebSocketsServer_Generic.h>  // Thư viện WebSocket
-#include "base64.h"                    // Thư viện mã hóa Base64
-
-// Chọn model camera
-#define CAMERA_MODEL_AI_THINKER  // Model AI-Thinker
+#include <ArduinoWebsockets.h>
+#define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
 
-// Thông tin WiFi
 const char* ssid = "TEKY OFFICE";
 const char* password = "Teky@2018";
+const char* websocket_server_host = "<YOUR_LOCAL_IP_ADDRESS_HERE>";
+const uint16_t websocket_server_port = 8888;
 
-// Cổng WebSocket
-#define WS_PORT 81
-WebSocketsServer webSocket = WebSocketsServer(WS_PORT);
+using namespace websockets;
+WebsocketsClient client;
+bool isWebSocketConnected;
 
-// Hàm khởi động camera
-void startCamera() {
+void onEventsCallback(WebsocketsEvent event, String data){
+  if(event == WebsocketsEvent::ConnectionOpened){
+    Serial.println("Connection Opened");
+    isWebSocketConnected = true;
+  }else if(event == WebsocketsEvent::ConnectionClosed){
+    Serial.println("Connection Closed");
+    isWebSocketConnected = false;
+    webSocketConnect();
+  }
+}
+
+void setup() {
+  isWebSocketConnected = false;
+  Serial.begin(115200);
+  Serial.println();
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -36,85 +48,64 @@ void startCamera() {
   config.pin_sscb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
+  config.xclk_freq_hz = 10000000;
   config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size = FRAMESIZE_VGA;
+  config.jpeg_quality = 40;
+  config.fb_count = 2;
 
-  if (psramFound()) {
-    config.frame_size = FRAMESIZE_QQVGA;  // 160x120 - Độ phân giải rất thấp
-    config.jpeg_quality = 12;             // Chất lượng JPEG thấp hơn
-    config.fb_count = 2;                  // Sử dụng 2 buffer
-  } else {
-    config.frame_size = FRAMESIZE_QQVGA;  // 160x120
-    config.jpeg_quality = 15;             // Chất lượng JPEG thấp nhất
-    config.fb_count = 1;                  // Sử dụng 1 buffer
-  }
-
-
+  // camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
+ 
 
-  sensor_t* s = esp_camera_sensor_get();
-  s->set_framesize(s, FRAMESIZE_QQVGA);  // Giảm độ phân giải
-  s->set_quality(s, 12);                 // Chất lượng JPEG thấp
-  s->set_contrast(s, 1);                 // Tăng độ tương phản (tùy chọn)
-  s->set_brightness(s, 0);               // Cân bằng sáng
-  s->set_saturation(s, 0);               // Giảm bão hòa để xử lý nhanh hơn
-}
-
-// Hàm xử lý sự kiện WebSocket
-void handleWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
-  switch (type) {
-    case WStype_CONNECTED:
-      Serial.printf("[%u] Connected!\n", num);
-      break;
-    case WStype_DISCONNECTED:
-      Serial.printf("[%u] Disconnected!\n", num);
-      break;
-    default:
-      break;
-  }
-}
-
-void sendFrame() {
-  camera_fb_t* fb = esp_camera_fb_get();
-  if (!fb) {
-    Serial.println("Failed to capture frame");
-    return;
-  }
-
-  // Gửi dữ liệu nhị phân trực tiếp
-  webSocket.broadcastBIN(fb->buf, fb->len);
-
-  esp_camera_fb_return(fb);
-}
-
-
-void setup() {
-  Serial.begin(115200);
-  Serial.println();
-
-  // Kết nối WiFi
   WiFi.begin(ssid, password);
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi connected");
+  Serial.println("");
+  Serial.println("WiFi connected");
 
-  // Khởi động camera
-  startCamera();
+  client.onEvent(onEventsCallback);
+  webSocketConnect();
+}
 
-  // Khởi động WebSocket server
-  webSocket.begin();
-  webSocket.onEvent(handleWebSocketEvent);
-  Serial.printf("WebSocket server started @ ws://%s:%d\n", WiFi.localIP().toString().c_str(), WS_PORT);
+void webSocketConnect(){
+   while(!client.connect(websocket_server_host, websocket_server_port, "/")){
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("Websocket Connected!");
 }
 
 void loop() {
-  webSocket.loop();  // Xử lý WebSocket
-  sendFrame();       // Gửi frame ngay lập tức
-  delay(320);         // ~60 FPS (1000ms / 60 ≈ 16ms)
+
+  if(client.available()){
+    client.poll();
+  }
+  
+  if(!isWebSocketConnected) return;
+  
+  camera_fb_t *fb = esp_camera_fb_get();
+  if(!fb){
+    Serial.println("Camera capture failed");
+    esp_camera_fb_return(fb);
+    return;
+  }
+
+  if(fb->format != PIXFORMAT_JPEG){
+    Serial.println("Non-JPEG data not implemented");
+    return;
+  }
+  
+  //fb->buf[12] = 0x01; //FIRST CAM
+  fb->buf[12] = 0x02; //SECOND CAM
+
+  client.sendBinary((const char*) fb->buf, fb->len);
+  esp_camera_fb_return(fb);
 }
