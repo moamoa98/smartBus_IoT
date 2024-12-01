@@ -4,13 +4,12 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>ESP32-CAM Control</title>
-        <link href="css/entireframework.min.css" rel="stylesheet"
-            type="text/css">
+        <link href="css/entireframework.min.css" rel="stylesheet" type="text/css">
         <link href="css/custom.css" rel="stylesheet" type="text/css">
         <link href="css/style.css" rel="stylesheet" type="text/css">
 
     </head>
-    <body>
+    <body style="overflow: hidden">
         <h1>ESP32-CAM Control</h1>
         <div class="container" style="max-width = 100%;">
             <!-- Video Stream -->
@@ -92,21 +91,23 @@
 
         <script>
             document.getElementById('mode-toggle').addEventListener('click', function() {
-                fetch('/mode')
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.mode === 'manual') {
-                            document.getElementById('mode-toggle').textContent = 'Chuyển sang chế độ tự động';
-                        } else {
-                            document.getElementById('mode-toggle').textContent = 'Chuyển sang chế độ thủ công';
-                        }
-                    });
+                var mode = document.getElementById('mode-toggle').textContent;
+                if (mode === 'Chuyển sang chế độ tự động') {
+                    sendMessage('auto');
+                    document.getElementById('mode-toggle').textContent = 'Chuyển sang chế độ thủ công';
+                }
+                else {
+                    sendMessage('manual');
+                    document.getElementById('mode-toggle').textContent = 'Chuyển sang chế độ tự động';
+                }
+
+
             });
     
             document.getElementById('servo-angle').addEventListener('input', function() {
                 const angle = document.getElementById('servo-angle').value;
                 document.getElementById('servo-angle-value').textContent = angle;
-                fetch(`/servo?angle=${angle}`);
+                sendMessage(angle);
             });
     
             let intervalId;
@@ -115,10 +116,10 @@
                 intervalId = setInterval(function() {
                     let angle = parseInt(document.getElementById('servo-angle').value);
                     if (angle > 60) {
-                        angle = Math.max(60, angle - 1);
+                        angle = Math.max(60, angle - 10);
                         document.getElementById('servo-angle').value = angle;
                         document.getElementById('servo-angle-value').textContent = angle;
-                        fetch(`/servo?angle=${angle}`);
+                        sendMessage(angle);
                     }
                 }, 100);
             });
@@ -131,10 +132,10 @@
                 intervalId = setInterval(function() {
                     let angle = parseInt(document.getElementById('servo-angle').value);
                     if (angle < 120) {
-                        angle = Math.min(120, angle + 1);
+                        angle = Math.min(120, angle + 10);
                         document.getElementById('servo-angle').value = angle;
                         document.getElementById('servo-angle-value').textContent = angle;
-                        fetch(`/servo?angle=${angle}`);
+                        sendMessage(angle);
                     }
                 }, 100);
             });
@@ -142,6 +143,29 @@
             document.querySelector('.right.control').addEventListener('mouseup', function() {
                 clearInterval(intervalId);
             });
+
+            // ----------------------------------------------------------------
+            // handle keyboard events key press to up button and down button
+            // ----------------------------------------------------------------
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'ArrowUp' && !intervalId) {
+                    intervalId = setInterval(function() {
+                        sendMessage('up');
+                    }, 100);
+                } else if (event.key === 'ArrowDown' && !intervalId) {
+                    intervalId = setInterval(function() {
+                        sendMessage('down');
+                    }, 100);
+                }
+            });
+            document.addEventListener('keyup', function(event) {
+                if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                    clearInterval(intervalId);
+                    intervalId = null;
+                    sendMessage('stop');
+                }
+            });
+            // ----------------------------------------------------------------
     
             document.body.requestPointerLock();
             document.addEventListener('keydown', function(event) {
@@ -149,20 +173,20 @@
                     intervalId = setInterval(function() {
                         let angle = parseInt(document.getElementById('servo-angle').value);
                         if (angle > 60) {
-                            angle = Math.max(60, angle - 1);
+                            angle = Math.max(60, angle - 10);
                             document.getElementById('servo-angle').value = angle;
                             document.getElementById('servo-angle-value').textContent = angle;
-                            fetch(`/servo?angle=${angle}`);
+                            sendMessage(angle);
                         }
                     }, 100);
                 } else if (event.key === 'ArrowRight' && !intervalId) {
                     intervalId = setInterval(function() {
                         let angle = parseInt(document.getElementById('servo-angle').value);
                         if (angle < 120) {
-                            angle = Math.min(120, angle + 1);
+                            angle = Math.min(120, angle + 10);
                             document.getElementById('servo-angle').value = angle;
                             document.getElementById('servo-angle-value').textContent = angle;
-                            fetch(`/servo?angle=${angle}`);
+                            sendMessage(angle);
                         }
                     }, 100);
                 }
@@ -175,7 +199,7 @@
                 }
             });
     
-            var targetUrl = `ws://${window.location.hostname}/ws`;
+    var targetUrl = `ws://192.168.1.127/ws`;
     var websocket;
     window.addEventListener('load', onLoad);
     
@@ -195,7 +219,7 @@
       console.log('Starting connection to server..');
     }
     function onClose(event) {
-      console.log('Closing connection to server..');
+      console.log('Closing connect  ion to server..');
       setTimeout(initializeSocket, 2000);
     }
     function onMessage(event) {

@@ -159,15 +159,7 @@ void sendCarCommand(const char *command)
 {
   // command could be either "left", "right", "forward" or "reverse" or "stop"
   // or speed settingg "slow-speed", "normal-speed", or "fast-speed"
-  if (strcmp(command, "left") == 0)
-  {
-    car.turnLeft();
-  }
-  else if (strcmp(command, "right") == 0)
-  {
-    car.turnRight();
-  }
-  else if (strcmp(command, "up") == 0)
+  if (strcmp(command, "up") == 0)
   {
     car.moveForward();
   }
@@ -190,6 +182,13 @@ void sendCarCommand(const char *command)
   else if (strcmp(command, "fast-speed") == 0)
   {
     car.setCurrentSpeed(speedSettings::FAST);
+  }
+  
+  else
+  {
+    int agleOfSteering = atoi(command);
+    Serial.println(agleOfSteering);
+    setSteeringAngle(agleOfSteering);
   }
 }
 
