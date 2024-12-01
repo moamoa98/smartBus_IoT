@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>ESP32-CAM Control</title>
+        <link href="css/entireframework.min.css" rel="stylesheet"
+            type="text/css">
+        <link href="css/custom.css" rel="stylesheet" type="text/css">
+        <link href="css/style.css" rel="stylesheet" type="text/css">
+
+    </head>
+    <body>
+        <h1>ESP32-CAM Control</h1>
+        <div class="container" style="max-width = 100%;">
+            <!-- Video Stream -->
+            <div class="tcenter">
+                <canvas id="canvas">
+                    day la canvas &lt;canvas&gt;.
+                </canvas>
+            </div>
+            <!-- Controls Container -->
+            <div class="controls-container">
+                <!-- Mode Controls -->
+                <div class="mode-controls">
+                    <button id="mode-toggle">Chuyển sang chế độ tự động</button>
+                </div>
+                <!-- Speeed -->
+                <div class="speed-settings">Speed Settings</div>
+                <div class="wrapper">
+                    <input type="radio" name="speed-settings" id="option-1"
+                        value="slow-speed" %SPEED_SLOW_STATUS%>
+                    <input type="radio" name="speed-settings" id="option-2"
+                        value="normal-speed" %SPEED_NORMAL_STATUS%>
+                    <input type="radio" name="speed-settings" id="option-3"
+                        value="fast-speed" %SPEED_FAST_STATUS%>
+                    <label for="option-1" class="option option-1">
+                        <div class="dot"></div>
+                        <span>Slow</span>
+                    </label>
+                    <label for="option-2" class="option option-2">
+                        <div class="dot"></div>
+                        <span>Normal</span>
+                    </label>
+                    <label for="option-3" class="option option-3">
+                        <div class="dot"></div>
+                        <span>Fast</span>
+                    </label>
+                </div>
+
+                <!-- Servo Angle Slider -->
+                <div class="servo-slider">
+                    <input type="range" id="servo-angle" name="servo-angle"
+                        min="60" max="120" value="90">
+                    <div id="servo-angle-value">90</div>
+                </div>
+
+                <!-- Controls -->
+                <div class="set blue">
+                    <nav class="o-pad">
+                        <a class="up control" id="upButton"
+                            data-direction="up"></a>
+                        <a class="right control" id="rightButton"
+                            data-direction="right"></a>
+                        <a class="down control" id="downButton"
+                            data-direction="down"></a>
+                        <a class="left control" id="leftButton"
+                            data-direction="left"></a>
+                    </nav>
+                </div>
+
+                <!-- Light Controls -->
+                <div class="light-controls">
+                    <button id="light-on">Bật đèn</button>
+                    <button id="light-off" class="light-off">Tắt đèn</button>
+                </div>
+
+                <!-- Camera Controls -->
+                <div class="camera-controls">
+                    <button id="camera-on">Bật Camera</button>
+                    <button id="camera-off">Tắt Camera</button>
+                </div>
+
+                <!-- Logo -->
+                <div class="logo">
+                    <img
+                        src="https://steamsolutions.com.vn/wp-content/uploads/2022/11/LOGO-TEKY-01-Larry-Pham-768x264.png"
+                        alt="Logo">
+                </div>
+            </div>
+        </div>
+
+        <script>
+            document.getElementById('mode-toggle').addEventListener('click', function() {
+                fetch('/mode')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.mode === 'manual') {
+                            document.getElementById('mode-toggle').textContent = 'Chuyển sang chế độ tự động';
+                        } else {
+                            document.getElementById('mode-toggle').textContent = 'Chuyển sang chế độ thủ công';
+                        }
+                    });
+            });
+    
+            document.getElementById('servo-angle').addEventListener('input', function() {
+                const angle = document.getElementById('servo-angle').value;
+                document.getElementById('servo-angle-value').textContent = angle;
+                fetch(`/servo?angle=${angle}`);
+            });
+    
+            let intervalId;
+    
+            document.querySelector('.left.control').addEventListener('mousedown', function() {
+                intervalId = setInterval(function() {
+                    let angle = parseInt(document.getElementById('servo-angle').value);
+                    if (angle > 60) {
+                        angle = Math.max(60, angle - 1);
+                        document.getElementById('servo-angle').value = angle;
+                        document.getElementById('servo-angle-value').textContent = angle;
+                        fetch(`/servo?angle=${angle}`);
+                    }
+                }, 100);
+            });
+    
+            document.querySelector('.left.control').addEventListener('mouseup', function() {
+                clearInterval(intervalId);
+            });
+    
+            document.querySelector('.right.control').addEventListener('mousedown', function() {
+                intervalId = setInterval(function() {
+                    let angle = parseInt(document.getElementById('servo-angle').value);
+                    if (angle < 120) {
+                        angle = Math.min(120, angle + 1);
+                        document.getElementById('servo-angle').value = angle;
+                        document.getElementById('servo-angle-value').textContent = angle;
+                        fetch(`/servo?angle=${angle}`);
+                    }
+                }, 100);
+            });
+    
+            document.querySelector('.right.control').addEventListener('mouseup', function() {
+                clearInterval(intervalId);
+            });
+    
+            document.body.requestPointerLock();
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'ArrowLeft' && !intervalId) {
+                    intervalId = setInterval(function() {
+                        let angle = parseInt(document.getElementById('servo-angle').value);
+                        if (angle > 60) {
+                            angle = Math.max(60, angle - 1);
+                            document.getElementById('servo-angle').value = angle;
+                            document.getElementById('servo-angle-value').textContent = angle;
+                            fetch(`/servo?angle=${angle}`);
+                        }
+                    }, 100);
+                } else if (event.key === 'ArrowRight' && !intervalId) {
+                    intervalId = setInterval(function() {
+                        let angle = parseInt(document.getElementById('servo-angle').value);
+                        if (angle < 120) {
+                            angle = Math.min(120, angle + 1);
+                            document.getElementById('servo-angle').value = angle;
+                            document.getElementById('servo-angle-value').textContent = angle;
+                            fetch(`/servo?angle=${angle}`);
+                        }
+                    }, 100);
+                }
+            });
+    
+            document.addEventListener('keyup', function(event) {
+                if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                    clearInterval(intervalId);
+                    intervalId = null;
+                }
+            });
+    
+            var targetUrl = `ws://${window.location.hostname}/ws`;
+    var websocket;
+    window.addEventListener('load', onLoad);
+    
+    
+    function onLoad() {
+      initializeSocket();
+    }
+    
+    function initializeSocket() {
+      console.log('Opening WebSocket connection to ESP32...');
+      websocket = new WebSocket(targetUrl);
+      websocket.onopen = onOpen;
+      websocket.onclose = onClose;
+      websocket.onmessage = onMessage;
+    }
+    function onOpen(event) {
+      console.log('Starting connection to server..');
+    }
+    function onClose(event) {
+      console.log('Closing connection to server..');
+      setTimeout(initializeSocket, 2000);
+    }
+    function onMessage(event) {
+      console.log("WebSocket message received:", event)
+    }
+    
+    function sendMessage(message) {
+      websocket.send(message);
+    }
+    
+    /*
+    Speed Settings Handler
+    */
+    var speedSettings = document.querySelectorAll(
+      'input[type=radio][name="speed-settings"]'
+    );
+    speedSettings.forEach((radio) =>
+      radio.addEventListener("change", () => 
+      {
+        var speedSettings = radio.value;
+        console.log('Speed Settings :: ' + speedSettings)
+        sendMessage(speedSettings); 
+      }
+    ));
+    
+    
+    /*
+    O-Pad/ D-Pad Controller and Javascript Code
+    */
+    // Prevent scrolling on every click!
+    // super sweet vanilla JS delegated event handling!
+    document.body.addEventListener("click", function (e) {
+      if (e.target && e.target.nodeName == "A") {
+        e.preventDefault();
+      }
+    });
+    
+    function touchStartHandler(event) {
+      var direction = event.target.dataset.direction;
+      console.log('Touch Start :: ' + direction)
+      sendMessage(direction);
+    }
+    
+    function touchEndHandler(event) {
+      const stop_command = 'stop';
+      var direction = event.target.dataset.direction;
+      console.log('Touch End :: ' + direction)
+      sendMessage(stop_command);
+    }
+    
+    
+    document.querySelectorAll('.control').forEach(item => {
+      item.addEventListener('touchstart', touchStartHandler);
+      item.addEventListener('touchend', touchEndHandler);
+      item.addEventListener('mousedown', touchStartHandler); // Add this line
+      item.addEventListener('mouseup', touchEndHandler); // Add this line
+    })
+
+    var portStr="";
+	if(location.port != "")
+	{
+		portStr=":"+location.port;
+	}
+	var protocolStr="ws";
+	if (location.protocol === 'https:') {
+		protocolStr="wss";
+	}
+	console.log(protocolStr+'://' + location.hostname + portStr+"/jpgstream_client");
+	var ws = new WebSocket(protocolStr+'://' + location.hostname + portStr+"/jpgstream_client");	
+	var canvas = document.getElementById('canvas');
+	var ctx = canvas.getContext('2d');
+	
+	var img = new Image();
+	img.onload = function() {
+			canvas.style.width='140vh';
+			canvas.style.height='auto';
+			ctx.drawImage(this, 0, 0, this.width,    this.height,     // source rectangle
+                   0, 0, canvas.width, canvas.height); // destination rectangle
+	}
+	
+	ws.onmessage = function(message) {	
+		var url = URL.createObjectURL(message.data);
+		img.src = url;		
+	};
+
+        </script>
+    </body>
+</html>

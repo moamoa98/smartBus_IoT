@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<%- include('./partials/head.ejs') %>
+<body class="page_display">
+	<div class="main_content">
+		<div class="page_title"><h1 class="tcenter">Camera relay</h1></div>
+		<div class="tcenter">
+			<canvas id="canvas">
+			 day la canvas &lt;canvas&gt;.
+			</canvas>
+		</div>
+	</div>
+	
+	<script>
+	var portStr="";
+	if(location.port != "")
+	{
+		portStr=":"+location.port;
+	}
+	var protocolStr="ws";
+	if (location.protocol === 'https:') {
+		protocolStr="wss";
+	}
+	console.log(protocolStr+'://' + location.hostname + portStr+"/jpgstream_client");
+	var ws = new WebSocket(protocolStr+'://' + location.hostname + portStr+"/jpgstream_client");	
+	var canvas = document.getElementById('canvas');
+	var ctx = canvas.getContext('2d');
+	
+	var img = new Image();
+	img.onload = function() {
+			canvas.style.width=this.width+'px';
+			canvas.style.height=this.height+'px';
+			ctx.drawImage(this, 0, 0, this.width,    this.height,     // source rectangle
+                   0, 0, canvas.width, canvas.height); // destination rectangle
+
+
+	}
+	
+	ws.onmessage = function(message) {	
+		var url = URL.createObjectURL(message.data);
+		img.src = url;		
+	};
+
+
+
+	</script>
+</body>
+</html>
