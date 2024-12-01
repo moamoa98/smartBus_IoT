@@ -290,6 +290,7 @@ void setup()
   }
 
   Serial.print("IP Address: ");
+
   Serial.println(WiFi.localIP());
 
   // Initialize SPIFFS
@@ -298,6 +299,7 @@ void setup()
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
+  // Serial.print(SPIFFS);
 
   // Add callback function to websocket server
   ws.onEvent(onWsEvent);
@@ -306,7 +308,7 @@ void setup()
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             {
               Serial.println("Requesting index page...");
-              request->send(SPIFFS, "/index.html", "text/html", false, indexPageProcessor);
+              request->send(SPIFFS, "data/index.html", "text/html", false, indexPageProcessor);
             });
 
   // Route to load entireframework.min.css file
