@@ -1,147 +1,291 @@
 #include <Arduino.h>
+#include <NewPing.h>
 #include <ESP32Servo.h>
+#include <WiFi.h>
+#include <WebServer.h>
 
-#define LED 0
-#define INA 15
-#define INB 2
-#define SERVO_PIN 4
+//wifi setup
+const char* ssid = "TEKY OFFICE";      
+const char* password = "Teky@2018"; 
 
-#define SAFE_DISTANCE  30    // Khoảng cách an toàn (cm)
-#define TURN_ANGLE  40      // Góc quay servo (độ)
-#define CENTER_ANGLE  90     // Góc trung tâm servo
+WebServer server(80);
 
-#define TURN_DELAY  1000     // Thời gian để xe quay (ms)
-#define REVERSE_TIME 1500 
+String serialData = "";
 
-//ultra
-#define TRIG_RIGHT 35
-#define ECHO_RIGHT 34
-#define TRIG_FRONT 32
-#define ECHO_FRONT 33
-#define TRIG_LEFT 26
-#define ECHO_LEFT 25
+// Pin định nghĩa
+#define TRIG_LEFT 14
+#define ECHO_LEFT 27
+#define TRIG_FRONT 26
+#define ECHO_FRONT 25
+#define TRIG_RIGHT 33
+#define ECHO_RIGHT 32
 
-//tạo đối tượng servo
-Servo steeringServo;
+#define SERVO_PIN 13
+#define INA 16
+#define INB 17
 
-void setSteeringAngle(int angle) {
-  steeringServo.write(angle);
-  delay(200);  // Đợi servo quay đến vị trí
+// Các hằng số
+#define SAFE_DISTANCE 30    // Khoảng cách an toàn (cm)
+#define CENTER_ANGLE 90     // Góc trung tâm servo
+#define MAX_ANGLE 130       // Góc tối đa bên phải
+#define MIN_ANGLE 50        // Góc tối đa bên trái
+#define MOTOR_SPEED 150     // Tốc độ động cơ
+#define TURN_DELAY 1000     // Thời gian quay
+
+//kích thước 5 mảng 5 lần xét gần nhất
+#define FILTER_SIZE 5 
+
+SemaphoreHandle_t distanceMutex;
+
+enum Direction { NONE, LEFT, RIGHT };
+Direction currentDirection = NONE;
+
+int leftDistances[FILTER_SIZE] = {0};
+int frontDistances[FILTER_SIZE] = {0};
+int rightDistances[FILTER_SIZE] = {0};
+
+volatile int distanceLeft=0;
+volatile int distanceFront=0;
+volatile int distanceRight=0;
+
+int leftIndex = 0, frontIndex = 0, rightIndex = 0;
+
+Servo servo;
+
+// Cấu hình cảm biến siêu âm
+NewPing sensorLeft(TRIG_LEFT, ECHO_LEFT, 400);
+NewPing sensorFront(TRIG_FRONT, ECHO_FRONT, 400);
+NewPing sensorRight(TRIG_RIGHT, ECHO_RIGHT, 400);
+
+// Hàm đọc khoảng cách
+// int getDistance(NewPing sensor) {
+//   delay(50);
+//   return sensor.ping_cm();
+// }
+int getFilteredDistance(NewPing sensor, int* distanceArray, int& currentIndex);
+void setMotorSpeed(int speed, bool forward);
+void adjustServo(int angle);
+
+void readDistanceTask(void *pvParameters) {
+
+
+  while (true) {
+
+    int Left = getFilteredDistance(sensorLeft, leftDistances, leftIndex);
+    int Front = getFilteredDistance(sensorFront, frontDistances, frontIndex);
+    int Right = getFilteredDistance(sensorRight, rightDistances, rightIndex);
+    
+    Serial.print("Left: "); Serial.print(distanceLeft);
+    Serial.print(" Front: "); Serial.print(distanceFront);
+    Serial.print(" Right: "); Serial.println(distanceRight);
+
+    //serialData = "Left:"+String(distanceLeft)+","+ "Font:"+String(distanceFront)+","+ "Right:"+String(distanceRight)+"\n";
+    //Serial.println(serialData);
+   // server.handleClient(); // xử lý yêu cầu từ client
+
+   if(xSemaphoreTake(distanceMutex,portMAX_DELAY)==pdTRUE){
+      distanceLeft=Left;
+      distanceFront=Front;
+      distanceRight=Right;
+      xSemaphoreGive(distanceMutex);
+   }
+
+   vTaskDelay(pdMS_TO_TICKS(100));
+  }
 }
 
-int getDistance(int trigPin, int echoPin) {
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
+void navigationTask(void *Parameters){
+
+  while (true)
+  {
+    int LocalDistanceLeft,LocalDistanceFront,LocalDistanceRight;
+
+    if(xSemaphoreTake(distanceMutex,portMAX_DELAY)==pdTRUE){
+      LocalDistanceLeft=distanceLeft;
+      LocalDistanceFront=distanceFront;
+      LocalDistanceRight=distanceRight;
+      xSemaphoreGive(distanceMutex);
+   }
+
+  if ((distanceFront < SAFE_DISTANCE && distanceFront > 0) || 
+    (distanceLeft < SAFE_DISTANCE && distanceLeft > 0) || 
+    (distanceRight < SAFE_DISTANCE && distanceRight > 0)) {
+    // Dựa trên trạng thái để quay trái/phải
+    if (currentDirection == NONE) {
+        // Ưu tiên đi về phía có khoảng cách lớn hơn
+        if (distanceLeft > distanceRight && distanceLeft > distanceFront) {
+            currentDirection = LEFT;
+        } else if (distanceRight > distanceLeft && distanceRight > distanceFront) {
+            currentDirection = RIGHT;
+        } else {
+            // Nếu cả 3 hướng đều chật, quay ngược lại
+            currentDirection = (random(2) == 0) ? LEFT : RIGHT;
+        }
+    }
+    
+    if (currentDirection == LEFT) {
+        adjustServo(MIN_ANGLE); // Quay trái
+    } else if (currentDirection == RIGHT) {
+        adjustServo(MAX_ANGLE); // Quay phải
+    }
+    
+    setMotorSpeed(MOTOR_SPEED, false); // Lùi lại một chút
+    delay(TURN_DELAY);
+} else {
+    // Trở về trạng thái cân bằng nếu không có vật cản
+    adjustServo(CENTER_ANGLE);
+    setMotorSpeed(MOTOR_SPEED, true); // Tiếp tục tiến
+    currentDirection = NONE; // Reset trạng thái
+}
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
   
-  long duration = pulseIn(echoPin, HIGH);
-  return duration * 0.034 / 2;
 }
 
-// Các hàm điều khiển động cơ đơn giản
-void stopMotor() {
-  digitalWrite(INA, LOW);
-  digitalWrite(INB, LOW);
+int getFilteredDistance(NewPing sensor, int* distanceArray, int& currentIndex) {
+  // Đọc khoảng cách mới
+  int newDistance = sensor.ping_cm();
+  
+  // Lưu giá trị mới vào mảng
+  distanceArray[currentIndex] = newDistance;
+  
+  // Tăng chỉ số, quay lại 0 nếu vượt quá kích thước mảng
+  currentIndex = (currentIndex + 1) % FILTER_SIZE;
+  
+  // Tính trung bình
+  long sum = 0;
+  int validMeasurements = 0;
+  
+  for (int i = 0; i < FILTER_SIZE; i++) {
+    // Chỉ tính những giá trị khác 0 (loại bỏ các phép đo không hợp lệ)
+    if (distanceArray[i] > 0) {
+      sum += distanceArray[i];
+      validMeasurements++;
+    }
+  }
+  
+  // Trả về 0 nếu không có phép đo hợp lệ
+  return (validMeasurements > 0) ? sum / validMeasurements : 0;
 }
 
-void forward() {
-  digitalWrite(INA, LOW);
-  digitalWrite(INB, HIGH);
+// Hàm điều khiển động cơ
+void setMotorSpeed(int speed, bool forward) {
+  if (forward) {
+      analogWrite(INA, speed);
+      analogWrite(INB, 0);
+  } else {
+     analogWrite(INA, 0);
+     analogWrite(INB, speed);
+  }
 }
 
-void backward() {
-  digitalWrite(INA, HIGH);
-  digitalWrite(INB, LOW);
+// Điều chỉnh servo
+void adjustServo(int angle) {
+  angle = constrain(angle, MIN_ANGLE, MAX_ANGLE); // Giới hạn góc
+  servo.write(angle);
 }
 
-void reverseAndTurn() {
-  // Dừng xe
-  stopMotor();
-  delay(200);
-  
-  // Lùi lại
-  Serial.println("Reversing");
-  setSteeringAngle(CENTER_ANGLE);
-  backward();
-  delay(REVERSE_TIME);
-  
-  // Dừng lại sau khi lùi
-  stopMotor();
-  delay(200);
-  
-  // Quay sang phải
-  Serial.println("Turning Right after reverse");
-  setSteeringAngle(CENTER_ANGLE + TURN_ANGLE);
-  forward();
-  delay(TURN_DELAY * 1.5);
-  
-  // Đưa bánh xe về giữa
-  setSteeringAngle(CENTER_ANGLE);
-}
+// Trạng thái hướng quay
+
 
 void setup() {
   Serial.begin(115200);
+
+  WiFi.begin(ssid, password);
+
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+    Serial.println("Connected!");
+
+  // In địa chỉ IP của ESP32
+  Serial.println(WiFi.localIP());
+
+  // Cấu hình Web Server
+  server.on("/", []() {
+    server.send(200, "text/plain", serialData);
+  });
+
+  server.begin();
+  Serial.println("Web Server started");
   
-  //động cơ dc
+  // Cấu hình pin
   pinMode(INA, OUTPUT);
   pinMode(INB, OUTPUT);
   
-  //ultrasonicSensor
-  pinMode(TRIG_RIGHT, OUTPUT);
-  pinMode(ECHO_RIGHT, INPUT);
-  pinMode(TRIG_FRONT, OUTPUT);
-  pinMode(ECHO_FRONT, INPUT);
-  pinMode(TRIG_LEFT, OUTPUT);
-  pinMode(ECHO_LEFT, INPUT);
+  servo.attach(SERVO_PIN);
+  servo.write(CENTER_ANGLE);
 
-  steeringServo.attach(SERVO_PIN);
-  setSteeringAngle(CENTER_ANGLE);
+   
 
-  // Khởi động với trạng thái dừng
-  stopMotor();
+  distanceMutex=xSemaphoreCreateMutex();
+
+  xTaskCreate(
+    readDistanceTask,     // Hàm task
+    "ReadDistance",       // Tên task
+    2048,                 // Kích thước stack
+    NULL,                 // Tham số truyền vào (không có)
+    1,                    // Mức ưu tiên
+    NULL                  // Handle task (không cần)
+  );
+
+  xTaskCreate(
+    navigationTask,       // Hàm task
+    "Navigation",         // Tên task
+    2048,                 // Kích thước stack
+    NULL,                 // Tham số truyền vào (không có)
+    1,                    // Mức ưu tiên
+    NULL                  // Handle task (không cần)
+  );
 }
 
 void loop() {
-  // Đọc khoảng cách từ các cảm biến
-  // int distanceFront = getDistance(TRIG_FRONT, ECHO_FRONT);
-  // int distanceLeft = getDistance(TRIG_LEFT, ECHO_LEFT);
-  // int distanceRight = getDistance(TRIG_RIGHT, ECHO_RIGHT);
+  // int distanceLeft = getDistance(sensorLeft);
+  // int distanceFront = getDistance(sensorFront);
+  // int distanceRight = getDistance(sensorRight);
+
+  // int distanceLeft = getFilteredDistance(sensorLeft, leftDistances, leftIndex);
+  // int distanceFront = getFilteredDistance(sensorFront, frontDistances, frontIndex);
+  // int distanceRight = getFilteredDistance(sensorRight, rightDistances, rightIndex);
   
-  // Serial.printf("Distance - Front: %d cm, Left: %d cm, Right: %d cm\n", 
-  //               distanceFront, distanceLeft, distanceRight);
-  
-  // if (distanceFront > SAFE_DISTANCE) {
-  //   // Đường phía trước an toàn, đi thẳng
-  //   setSteeringAngle(CENTER_ANGLE);
-  //   forward();
-  // } else {
-  //   // Dừng xe để kiểm tra hướng
-  //   stopMotor();
-  //   delay(500);
-    
-  //   if (distanceLeft > distanceRight && distanceLeft > SAFE_DISTANCE) {
-  //     // Rẽ trái nếu bên trái có nhiều không gian hơn
-  //     Serial.println("Turning Left");
-  //     setSteeringAngle(CENTER_ANGLE - TURN_ANGLE);
-  //     forward();
-  //     delay(TURN_DELAY);
-  //   } else if (distanceRight > SAFE_DISTANCE) {
-  //     // Rẽ phải nếu bên phải có không gian
-  //     Serial.println("Turning Right");
-  //     setSteeringAngle(CENTER_ANGLE + TURN_ANGLE);
-  //     forward();
-  //     delay(TURN_DELAY);
-  //   } else {
-  //     // Không có đường đi, lùi lại và quay đầu
-  //     reverseAndTurn();
+  // Serial.print("Left: "); Serial.print(distanceLeft);
+  // Serial.print(" Front: "); Serial.print(distanceFront);
+  // Serial.print(" Right: "); Serial.println(distanceRight);
+
+  // serialData = "Left:"+String(distanceLeft)+","+ "Font:"+String(distanceFront)+","+ "Right:"+String(distanceRight)+"\n";
+  // Serial.println(serialData);
+  // server.handleClient(); // xử lý yêu cầu từ client
+
+  // Phát hiện vật cản phía trước
+  // if (distanceFront < SAFE_DISTANCE && distanceFront > 0) {
+  //   // Dựa trên trạng thái để quay trái/phải
+  //   if (currentDirection == NONE) {
+  //     if (distanceLeft > distanceRight) {
+  //       currentDirection = LEFT;
+  //     } else {
+  //       currentDirection = RIGHT;
+  //     }
   //   }
+
+  //   if (currentDirection == LEFT) {
+  //     adjustServo(MIN_ANGLE); // Quay trái
+  //   } else if (currentDirection == RIGHT) {
+  //     adjustServo(MAX_ANGLE); // Quay phải
+  //   }
+
+  //   setMotorSpeed(MOTOR_SPEED, false); // Lùi lại một chút
+  //   delay(TURN_DELAY);
+  // } else {
+  //   // Trở về trạng thái cân bằng nếu không có vật cản
+  //   adjustServo(CENTER_ANGLE);
+  //   setMotorSpeed(MOTOR_SPEED, true); // Tiếp tục tiến
+  //   currentDirection = NONE; // Reset trạng thái
   // }
+  // delay(100);
 
-  forward();
-  // delay(2000);
-  // backward();
-  // delay(2000);
-
+  vTaskDelete(NULL);
 }
