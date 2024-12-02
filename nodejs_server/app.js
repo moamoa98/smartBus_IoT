@@ -55,16 +55,16 @@ server.on('upgrade', function upgrade(request, socket, head) {
 
 
 
-app.get('/', (req, res) => {
-  	res.render('index', {});
-});
+// app.get('/', (req, res) => {
+//   	res.render('index', {});
+// });
 
-app.get('/control', (req, res) => {
+app.get('/', (req, res) => {
   res.render('control', {});
 });
 
 
 server.listen(port, () => {
-	  console.log(`App listening at http://localhost:${port}`)
+	  console.log(`App listening at ${port}`)
 })
 
