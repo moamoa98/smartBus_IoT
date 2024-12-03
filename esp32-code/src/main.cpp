@@ -149,7 +149,8 @@ const char *password = "Teky@2018";
 
 // AsyncWebserver runs on port 80 and the asyncwebsocket is initialize at this point also
 AsyncWebServer server(80);
-AsyncWebSocket ws("/ws");
+AsyncWebSocket carWs("/carWs");
+AsyncWebSocket servoWs("/servoWs");
 
 // Our car object
 Car car;
@@ -192,6 +193,98 @@ void sendCarCommand(const char *command)
   }
 }
 
+// Function to send commands to servo
+void sendServoCommand(const char *command)
+{
+  int angleOfSteering = atoi(command);
+  Serial.println(angleOfSteering);
+  setSteeringAngle(angleOfSteering);
+}
+
+// Callback function that receives messages from websocket client
+void onCarWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+                  void *arg, uint8_t *data, size_t len)
+{
+  switch (type)
+  {
+  case WS_EVT_CONNECT:
+    Serial.printf("carWs[%s][%u] connect\n", server->url(), client->id());
+    client->printf("Hello Car Client %u :)", client->id());
+    client->ping();
+    break;
+
+  case WS_EVT_DISCONNECT:
+    Serial.printf("carWs[%s][%u] disconnect\n", server->url(), client->id());
+    break;
+
+  case WS_EVT_DATA:
+  {
+    AwsFrameInfo *info = (AwsFrameInfo *)arg;
+    if (info->final && info->index == 0 && info->len == len)
+    {
+      if (info->opcode == WS_TEXT)
+      {
+        data[len] = 0;
+        char *command = (char *)data;
+        Serial.printf("carWs[%s][%u] command: %s\n", server->url(), client->id(), command);
+        sendCarCommand(command);
+      }
+    }
+    break;
+  }
+
+  case WS_EVT_PONG:
+    Serial.printf("carWs[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char *)data : "");
+    break;
+
+  case WS_EVT_ERROR:
+    Serial.printf("carWs[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
+    break;
+  }
+}
+
+// Callback function that receives messages from websocket client
+void onServoWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
+                    void *arg, uint8_t *data, size_t len)
+{
+  switch (type)
+  {
+  case WS_EVT_CONNECT:
+    Serial.printf("servoWs[%s][%u] connect\n", server->url(), client->id());
+    client->printf("Hello Servo Client %u :)", client->id());
+    client->ping();
+    break;
+
+  case WS_EVT_DISCONNECT:
+    Serial.printf("servoWs[%s][%u] disconnect\n", server->url(), client->id());
+    break;
+
+  case WS_EVT_DATA:
+  {
+    AwsFrameInfo *info = (AwsFrameInfo *)arg;
+    if (info->final && info->index == 0 && info->len == len)
+    {
+      if (info->opcode == WS_TEXT)
+      {
+        data[len] = 0;
+        char *command = (char *)data;
+        Serial.printf("servoWs[%s][%u] command: %s\n", server->url(), client->id(), command);
+        sendServoCommand(command);
+      }
+    }
+    break;
+  }
+
+  case WS_EVT_PONG:
+    Serial.printf("servoWs[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char *)data : "");
+    break;
+
+  case WS_EVT_ERROR:
+    Serial.printf("servoWs[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
+    break;
+  }
+}
+
 // Processor for index.html page template.  This sets the radio button to checked or unchecked
 String indexPageProcessor(const String &var)
 {
@@ -218,48 +311,6 @@ String indexPageProcessor(const String &var)
     }
   }
   return status;
-}
-
-// Callback function that receives messages from websocket client
-void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-               void *arg, uint8_t *data, size_t len)
-{
-  switch (type)
-  {
-  case WS_EVT_CONNECT:
-    Serial.printf("ws[%s][%u] connect\n", server->url(), client->id());
-    client->printf("Hello Client %u :)", client->id());
-    client->ping();
-    break;
-
-  case WS_EVT_DISCONNECT:
-    Serial.printf("ws[%s][%u] disconnect\n", server->url(), client->id());
-    break;
-
-  case WS_EVT_DATA:
-  {
-    AwsFrameInfo *info = (AwsFrameInfo *)arg;
-    if (info->final && info->index == 0 && info->len == len)
-    {
-      if (info->opcode == WS_TEXT)
-      {
-        data[len] = 0;
-        char *command = (char *)data;
-        Serial.printf("ws[%s][%u] command: %s\n", server->url(), client->id(), command);
-        sendCarCommand(command);
-      }
-    }
-    break;
-  }
-
-  case WS_EVT_PONG:
-    Serial.printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char *)data : "");
-    break;
-
-  case WS_EVT_ERROR:
-    Serial.printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t *)arg), (char *)data);
-    break;
-  }
 }
 
 // Function called when resource is not found on the server
@@ -327,8 +378,10 @@ void setup()
   listSPIFFSFiles();
 
   // Add callback function to websocket server
-  ws.onEvent(onWsEvent);
-  server.addHandler(&ws);
+  carWs.onEvent(onCarWsEvent);
+  servoWs.onEvent(onServoWsEvent);
+  server.addHandler(&carWs);
+  server.addHandler(&servoWs);
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
             {
