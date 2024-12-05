@@ -4,12 +4,17 @@
 #include <ESPAsyncWebServer.h>
 #include "SPIFFS.h"
 #include <ESP32Servo.h>
+#include <NewPing.h>
 
 int currentDegree = 90;
 int maxLeft = 50;
 int maxRight = 140;
+Servo servo;
 
 #define SERVO_PIN 13
+#define INA 16
+#define INB 17
+
 
 /*
   The resolution of the PWM is 8 bit so the value is between 0-255
@@ -28,15 +33,11 @@ Servo steeringServo;
 void setSteeringAngle(int angle)
 {
   steeringServo.write(angle);
-  delay(200); // Đợi servo quay đến vị trí
 }
 
 class Car
 {
 private:
-  // Motor pins
-  int INA = 16;
-  int INB = 17;
 
   // PWM Setup to control motor speed
   // const int SPEED_CONTROL_PIN = 16;
@@ -155,6 +156,45 @@ AsyncWebSocket servoWs("/servoWs");
 // Our car object
 Car car;
 
+// Pin definitions for autorun
+#define TRIG_LEFT 14
+#define ECHO_LEFT 27
+#define TRIG_FRONT 26
+#define ECHO_FRONT 25
+#define TRIG_RIGHT 33
+#define ECHO_RIGHT 32
+
+// Constants for autorun
+#define SAFE_DISTANCE 30
+#define CENTER_ANGLE 90
+#define MAX_ANGLE 130
+#define MIN_ANGLE 50
+#define MOTOR_SPEED 150
+#define TURN_DELAY 1000
+#define FILTER_SIZE 5
+
+// Autorun variables
+SemaphoreHandle_t distanceMutex;
+enum Direction { NONE, LEFT, RIGHT };
+Direction currentDirection = NONE;
+enum ControlMode { AUTO, MANUAL };
+volatile ControlMode currentControlMode = MANUAL;
+TaskHandle_t readDistanceTaskHandle = NULL;
+TaskHandle_t navigationTaskHandle = NULL;
+int leftDistances[FILTER_SIZE] = {0};
+int frontDistances[FILTER_SIZE] = {0};
+int rightDistances[FILTER_SIZE] = {0};
+volatile int distanceLeft = 0;
+volatile int distanceFront = 0;
+volatile int distanceRight = 0;
+int leftIndex = 0, frontIndex = 0, rightIndex = 0;
+NewPing sensorLeft(TRIG_LEFT, ECHO_LEFT, 400);
+NewPing sensorFront(TRIG_FRONT, ECHO_FRONT, 400);
+NewPing sensorRight(TRIG_RIGHT, ECHO_RIGHT, 400);
+
+void switchControlMode(ControlMode);
+int getFilteredDistance(NewPing, int *, int &);
+void setMotorSpeed(int, bool);
 // Function to send commands to car
 void sendCarCommand(const char *command)
 {
@@ -183,10 +223,11 @@ void sendCarCommand(const char *command)
   else if (strcmp(command, "fast-speed") == 0)
   {
     car.setCurrentSpeed(speedSettings::FAST);
-  }
-  
-  else
-  {
+  } else if (strcmp(command, "auto") == 0) {
+    switchControlMode(AUTO);
+  } else if (strcmp(command, "manual") == 0) {
+    switchControlMode(MANUAL);
+  } else {
     int agleOfSteering = atoi(command);
     Serial.println(agleOfSteering);
     setSteeringAngle(agleOfSteering);
@@ -330,6 +371,142 @@ void listSPIFFSFiles()
   }
 }
 
+int getFilteredDistance(NewPing sensor, int* distanceArray, int& currentIndex) {
+  // Đọc khoảng cách mới
+  int newDistance = sensor.ping_cm();
+  
+  // Lưu giá trị mới vào mảng
+  distanceArray[currentIndex] = newDistance;
+  
+  // Tăng chỉ số, quay lại 0 nếu vượt quá kích thước mảng
+  currentIndex = (currentIndex + 1) % FILTER_SIZE;
+  
+  // Tính trung bình
+  long sum = 0;
+  int validMeasurements = 0;
+  
+  for (int i = 0; i < FILTER_SIZE; i++) {
+    // Chỉ tính những giá trị khác 0 (loại bỏ các phép đo không hợp lệ)
+    if (distanceArray[i] > 0) {
+      sum += distanceArray[i];
+      validMeasurements++;
+    }
+  }
+  
+  // Trả về 0 nếu không có phép đo hợp lệ
+  return (validMeasurements > 0) ? sum / validMeasurements : 0;
+}
+
+void setMotorSpeed(int speed, bool forward) {
+  if (forward) {
+      analogWrite(INA, speed);
+      analogWrite(INB, 0);
+  } else {
+     analogWrite(INA, 0);
+     analogWrite(INB, speed);
+  }
+}
+
+void adjustServo(int angle) {
+  angle = constrain(angle, MIN_ANGLE, MAX_ANGLE); // Giới hạn góc
+  servo.write(angle);
+}
+
+void readDistanceTask(void *pvParameters) {
+  
+  while (true) {
+        if (currentControlMode == MANUAL) {
+        vTaskSuspend(NULL);  // Tạm dừng task hiện tại
+    }
+
+    int Left = getFilteredDistance(sensorLeft, leftDistances, leftIndex);
+    int Front = getFilteredDistance(sensorFront, frontDistances, frontIndex);
+    int Right = getFilteredDistance(sensorRight, rightDistances, rightIndex);
+    
+    Serial.print("Left: "); Serial.print(distanceLeft);
+    Serial.print(" Front: "); Serial.print(distanceFront);
+    Serial.print(" Right: "); Serial.println(distanceRight);
+
+    //serialData = "Left:"+String(distanceLeft)+","+ "Font:"+String(distanceFront)+","+ "Right:"+String(distanceRight)+"\n";
+    //Serial.println(serialData);
+   // server.handleClient(); // xử lý yêu cầu từ client
+
+   if(xSemaphoreTake(distanceMutex,portMAX_DELAY)==pdTRUE){
+      distanceLeft=Left;
+      distanceFront=Front;
+      distanceRight=Right;
+      xSemaphoreGive(distanceMutex);
+   }
+
+   vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
+void navigationTask(void *Parameters) {
+  while (true)
+  {
+
+    if (currentControlMode == MANUAL) {
+      vTaskSuspend(NULL);  // Tạm dừng task hiện tại
+    }
+    int LocalDistanceLeft,LocalDistanceFront,LocalDistanceRight;
+
+    if(xSemaphoreTake(distanceMutex,portMAX_DELAY)==pdTRUE){
+      LocalDistanceLeft=distanceLeft;
+      LocalDistanceFront=distanceFront;
+      LocalDistanceRight=distanceRight;
+      xSemaphoreGive(distanceMutex);
+   }
+
+  if ((distanceFront < SAFE_DISTANCE && distanceFront > 0) || 
+    (distanceLeft < SAFE_DISTANCE && distanceLeft > 0) || 
+    (distanceRight < SAFE_DISTANCE && distanceRight > 0)) {
+    // Dựa trên trạng thái để quay trái/phải
+    if (currentDirection == NONE) {
+        // Ưu tiên đi về phía có khoảng cách lớn hơn
+        if (distanceLeft > distanceRight && distanceLeft > distanceFront) {
+            currentDirection = LEFT;
+        } else if (distanceRight > distanceLeft && distanceRight > distanceFront) {
+            currentDirection = RIGHT;
+        } else {
+            // Nếu cả 3 hướng đều chật, quay ngược lại
+            currentDirection = (random(2) == 0) ? LEFT : RIGHT;
+        }
+    }
+    
+    if (currentDirection == LEFT) {
+        setSteeringAngle(MIN_ANGLE); // Quay trái
+    } else if (currentDirection == RIGHT) {
+        setSteeringAngle(MAX_ANGLE); // Quay phải
+    }
+    
+    setMotorSpeed(MOTOR_SPEED, false); // Lùi lại một chút
+    delay(TURN_DELAY);
+} else {
+    // Trở về trạng thái cân bằng nếu không có vật cản
+    setSteeringAngle(CENTER_ANGLE);
+    setMotorSpeed(MOTOR_SPEED, true); // Tiếp tục tiến
+    currentDirection = NONE; // Reset trạng thái
+}
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+  
+}
+
+void switchControlMode(ControlMode mode) {
+  currentControlMode = mode;
+  if (mode == MANUAL) {
+    vTaskSuspend(readDistanceTaskHandle);
+    vTaskSuspend(navigationTaskHandle);
+    car.stop();
+    setSteeringAngle(CENTER_ANGLE);
+  } else {
+    vTaskResume(readDistanceTaskHandle);
+    vTaskResume(navigationTaskHandle);
+  }
+}
+
 // Setup function
 void setup()
 {
@@ -409,6 +586,10 @@ void setup()
 
   // Start server
   server.begin();
+
+  distanceMutex = xSemaphoreCreateMutex();
+  xTaskCreate(readDistanceTask, "ReadDistance", 2048, NULL, 1, &readDistanceTaskHandle);
+  xTaskCreate(navigationTask, "Navigation", 2048, NULL, 1, &navigationTaskHandle);
 }
 
 void loop()

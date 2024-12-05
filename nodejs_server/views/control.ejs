@@ -4,14 +4,15 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>ESP32-CAM Control</title>
-        <link href="css/entireframework.min.css" rel="stylesheet" type="text/css">
+        <link href="css/entireframework.min.css" rel="stylesheet"
+            type="text/css">
         <link href="css/custom.css" rel="stylesheet" type="text/css">
         <link href="css/style.css" rel="stylesheet" type="text/css">
 
     </head>
     <body style="overflow: hidden">
         <h1>ESP32-CAM Control</h1>
-        <div class="container" style="max-width = 100%;">
+        <div class="container" style="max-width: 100%; justify-content: center;">
             <!-- Video Stream -->
             <div class="tcenter">
                 <canvas id="canvas">
@@ -24,7 +25,7 @@
                 <div class="mode-controls">
                     <button id="mode-toggle">Chuyển sang chế độ tự động</button>
                 </div>
-                <!-- Speeed -->
+                <!-- Speeed
                 <div class="speed-settings">Speed Settings</div>
                 <div class="wrapper">
                     <input type="radio" name="speed-settings" id="option-1"
@@ -45,12 +46,12 @@
                         <div class="dot"></div>
                         <span>Fast</span>
                     </label>
-                </div>
+                </div> -->
 
                 <!-- Servo Angle Slider -->
                 <div class="servo-slider">
                     <input type="range" id="servo-angle" name="servo-angle"
-                        min="40" max="140" value="90">
+                        min="60" max="120" value="90">
                     <div id="servo-angle-value">90</div>
                 </div>
 
@@ -74,11 +75,6 @@
                     <button id="light-off" class="light-off">Tắt đèn</button>
                 </div>
 
-                <!-- Camera Controls -->
-                <div class="camera-controls">
-                    <button id="camera-on">Bật Camera</button>
-                    <button id="camera-off">Tắt Camera</button>
-                </div>
 
                 <!-- Logo -->
                 <div class="logo">
@@ -177,8 +173,8 @@
             document.querySelector('.left.control').addEventListener('mousedown', function() {
                 intervalId = setInterval(function() {
                     let angle = parseInt(document.getElementById('servo-angle').value);
-                    if (angle > 40) {
-                        angle = Math.max(40, angle - 10);
+                    if (angle > 60) {
+                        angle = Math.max(60, angle - 10);
                         document.getElementById('servo-angle').value = angle;
                         document.getElementById('servo-angle-value').textContent = angle;
                         sendServoMessage(angle);
@@ -193,8 +189,8 @@
             document.querySelector('.right.control').addEventListener('mousedown', function() {
                 intervalId = setInterval(function() {
                     let angle = parseInt(document.getElementById('servo-angle').value);
-                    if (angle < 140) {
-                        angle = Math.min(140, angle + 10);
+                    if (angle < 120) {
+                        angle = Math.min(120, angle + 10);
                         document.getElementById('servo-angle').value = angle;
                         document.getElementById('servo-angle-value').textContent = angle;
                         sendServoMessage(angle);
@@ -234,8 +230,8 @@
                 if (event.key === 'ArrowLeft' && !intervalId) {
                     intervalId = setInterval(function() {
                         let angle = parseInt(document.getElementById('servo-angle').value);
-                        if (angle > 40) {
-                            angle = Math.max(40, angle - 10);
+                        if (angle > 60) {
+                            angle = Math.max(60, angle - 10);
                             document.getElementById('servo-angle').value = angle;
                             document.getElementById('servo-angle-value').textContent = angle;
                             sendServoMessage(angle);
@@ -244,8 +240,8 @@
                 } else if (event.key === 'ArrowRight' && !intervalId) {
                     intervalId = setInterval(function() {
                         let angle = parseInt(document.getElementById('servo-angle').value);
-                        if (angle < 140) {
-                            angle = Math.min(140, angle + 10);
+                        if (angle < 120) {
+                            angle = Math.min(120, angle + 10);
                             document.getElementById('servo-angle').value = angle;
                             document.getElementById('servo-angle-value').textContent = angle;
                             sendServoMessage(angle);
@@ -366,6 +362,59 @@
 		var url = URL.createObjectURL(message.data);
 		img.src = url;		
 	};
+
+    const keysPressed = {};
+
+document.addEventListener('keydown', function(event) {
+    keysPressed[event.key] = true;
+
+    // Điều khiển động cơ tiến (ArrowUp) và servo quay trái (ArrowLeft) đồng thời
+    if (keysPressed['ArrowUp'] && keysPressed['ArrowLeft']) {
+        sendCarMessage('up');
+        let angle = parseInt(document.getElementById('servo-angle').value);
+        if (angle > 60) {
+            angle -= 10;
+            document.getElementById('servo-angle').value = angle;
+            document.getElementById('servo-angle-value').textContent = angle;
+            sendServoMessage(angle);
+        }
+    }
+    // Chỉ điều khiển động cơ tiến
+    else if (keysPressed['ArrowUp']) {
+        sendCarMessage('up');
+    }
+    // Chỉ điều khiển servo quay trái
+    else if (keysPressed['ArrowLeft']) {
+        let angle = parseInt(document.getElementById('servo-angle').value);
+        if (angle > 60) {
+            angle -= 10;
+            document.getElementById('servo-angle').value = angle;
+            document.getElementById('servo-angle-value').textContent = angle;
+            sendServoMessage(angle);
+        }
+    }
+});
+
+document.addEventListener('keyup', function(event) {
+    delete keysPressed[event.key];
+
+    // Khi không nhấn phím, dừng động cơ
+    if (!keysPressed['ArrowUp'] && !keysPressed['ArrowDown']) {
+        sendCarMessage('stop');
+    }
+});
+
+
+    // add event listener for light on button
+    document.getElementById('light-on').addEventListener('click', function() {
+        ws.send('ON');
+    });
+
+    // add event listener for light off button
+    document.getElementById('light-off').addEventListener('click', function() {
+        ws.send('OFF');
+    });
+
 
         </script>
     </body>
